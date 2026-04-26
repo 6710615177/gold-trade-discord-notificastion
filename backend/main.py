@@ -14,6 +14,41 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from groq import Groq
+from dotenv import load_dotenv
+from fastapi import Request
+
+#line notification เอามาไว้ข้างบนเพราะลองเอาไว้ข้างล่างแล้วเหมือนมีโค้ดไหนสักอันมองข้ามไป
+load_dotenv()
+
+LINE_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_USER_ID = os.getenv("LINE_USER_ID")
+
+def send_line_alert(action: str, reason: str, price=None):
+    if action not in ["BUY", "SELL"]:
+        return
+
+    text = f"""🚨 AI Gold Signal: {action}
+
+ราคา: {price if price else "-"} THB
+เหตุผล:
+{reason}
+"""
+
+    res = requests.post(
+        "https://api.line.me/v2/bot/message/push",
+        headers={
+            "Authorization": f"Bearer {LINE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "to": LINE_USER_ID,
+            "messages": [{"type": "text", "text": text}],
+        },
+        timeout=10,
+    )
+
+    print("LINE STATUS:", res.status_code)
+    print("LINE RESPONSE:", res.text)
 
 # =====================================================================
 # 1. MASTER CONFIGURATION
@@ -369,6 +404,15 @@ def trigger_analysis():
         elif "REASONING:" in line_u: ai_reason = line.split(":", 1)[1].strip()
 
     full_reason = f"<strong>AI Reason:</strong> {ai_reason}<br/><br/><i>[Quant]</i> {quant_out}<br/><i>[Currency]</i> {currency_out}"
+    
+     # ส่ง LINE เมื่อ AI trigger BUY/SELL
+    if ai_act in ["BUY", "SELL"]:
+        send_line_alert(
+            ai_act,
+            ai_reason,
+            market["HSH_Sell"] if ai_act == "BUY" else market["HSH_Buy"]
+        )
+
     return {"ai_action": ai_act, "ai_amount_thb": ai_amt, "ai_reason": full_reason}
 
 @api_router.post("/execute")
@@ -423,6 +467,12 @@ def execute_trade(req: ExecuteRequest):
     conn.commit()
 
     return {"status": "success", "executed_action": act, "net_asset_value": nav}
+
+# DEBUG ONLY
+# @api_router.get("/test-line")
+# def test_line():
+#     send_line_alert("BUY", "ทดสอบแจ้งเตือน")
+#     return {"ok": True}
 
 app.include_router(api_router)
 
