@@ -11,7 +11,7 @@ export default function ThaiGoldChart({ onPriceUpdate }) {
     const fetchChartData = async () => {
       try {
         // ดึงข้อมูลกราฟทั้งหมดที่ Backend เตรียมไว้ให้
-        const res = await fetch(`/api/chart?t=${Date.now()}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/chart?t=${Date.now()}`);
         const json = await res.json();
         
         if (json && json.status === "success" && json.data.length > 0) {

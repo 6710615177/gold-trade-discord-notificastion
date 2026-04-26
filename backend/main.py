@@ -10,6 +10,7 @@ import yfinance as yf
 from datetime import datetime, time as dt_time, timedelta
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from groq import Groq
@@ -270,14 +271,51 @@ def get_status():
     market = get_live_hsh_data()
     period_key, period_name, is_active, end_time = get_trading_period(now)
 
-    if portfolio.get('Current_Date') != str(now.date()) or portfolio.get('Current_Period') != period_key:
-        portfolio['Current_Date'] = str(now.date())
-        portfolio['Current_Period'] = period_key
-        portfolio['Trades_Count'] = 0
+    if portfolio.get("Current_Date") != str(now.date()) or portfolio.get("Current_Period") != period_key:
+        portfolio["Current_Date"] = str(now.date())
+        portfolio["Current_Period"] = period_key
+        portfolio["Trades_Count"] = 0
         save_portfolio(portfolio)
 
-    nav = portfolio['THB_Balance'] + (portfolio['Gold_Gram'] * (market['HSH_Buy'] / BAHT_TO_GRAM)) if market else portfolio['THB_Balance']
-    return {"portfolio": portfolio, "market": market, "net_asset_value": nav, "period": {"name": period_name, "is_active": is_active, "trades_done": portfolio['Trades_Count']}}
+    nav = (
+        portfolio["THB_Balance"] + (portfolio["Gold_Gram"] * (market["HSH_Buy"] / BAHT_TO_GRAM))
+        if market
+        else portfolio["THB_Balance"]
+    )
+
+    #ถ้ามีข้อมูลจริง ลบ mock up นี้ออก
+    performance = {
+        "total_closed_trade": 18,
+        "win_rate": 66.67,
+        "total_profit": 12500.50,
+        "unrealized_pl": 2300.00,
+
+        "avg_win": 1850.75,
+        "avg_loss": -920.25,
+        "expectancy": 923.40,
+
+        "best_trade": 14.82,
+        "worst_trade": -6.35,
+        "median_trade": 3.75,
+        "top10_trade": 12.40,
+        "bottom10_trade": -4.90,
+
+        "xirr": 18.25,
+        "avg_capital_year": 85000.00,
+        "sharpe_ratio": 1.42,
+    }
+    
+    return {
+        "portfolio": portfolio,
+        "market": market,
+        "net_asset_value": nav,
+        "period": {
+            "name": period_name,
+            "is_active": is_active,
+            "trades_done": portfolio["Trades_Count"],
+        },
+        "performance": performance, #ถ้ามีข้อมูลจริง แก้ฟังก์ชั่นนี้ เช่น performance = calculate_performance_from_trades()
+    }
 
 @api_router.post("/portfolio")
 def update_portfolio(req: PortfolioUpdate):
@@ -404,3 +442,11 @@ if os.path.exists(FRONTEND_DIST):
     async def serve_frontend(full_path: str):
         if full_path.startswith("api/") or full_path.startswith("hsh-api/"): raise HTTPException(status_code=404)
         return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+    
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
