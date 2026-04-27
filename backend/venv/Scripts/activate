@@ -38,7 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="D:\WebTest\gold-trading-platform\backend\venv"
+VIRTUAL_ENV="D:\cn240\gold-trade-LSTM-plus-LLM\backend\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

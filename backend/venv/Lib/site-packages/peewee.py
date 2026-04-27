@@ -44,21 +44,19 @@ except ImportError:
     pass
 try:
     import psycopg2
-    from psycopg2 import errors as pg_errors
     from psycopg2 import extensions as pg_extensions
     from psycopg2.extras import register_uuid as pg_register_uuid
     from psycopg2.extras import Json as Json_pg2
     pg_register_uuid()
 except ImportError:
-    psycopg2 = pg_errors = Json_pg2 = None
+    psycopg2 = Json_pg2 = None
 try:
     import psycopg
-    from psycopg import errors as pg3_errors
     from psycopg.pq import TransactionStatus
     from psycopg.types.json import Json as Json_pg3
     from psycopg.types.json import Jsonb as Jsonb_pg3
 except ImportError:
-    psycopg = pg3_errors = Json_pg3 = Jsonb_pg3 = None
+    psycopg = Json_pg3 = Jsonb_pg3 = None
 
 mysql_passwd = False
 try:
@@ -71,7 +69,7 @@ except ImportError:
         mysql = None
 
 
-__version__ = '4.0.4'
+__version__ = '4.0.5'
 __all__ = [
     'AnyField',
     'AsIs',
@@ -1123,13 +1121,15 @@ class CTE(_HashableSource, Source):
             raise ValueError('select_from() must specify one or more columns '
                              'from the CTE to select.')
 
-        query = (Select((self,), columns)
-                 .with_cte(self)
-                 .bind(self._query._database))
-        try:
-            query = query.objects(self._query.model)
-        except AttributeError:
-            pass
+        if hasattr(self._query, 'model'):
+            query = (self._query.model
+                     .select(*columns)
+                     .from_(self)
+                     .with_cte(self))
+        else:
+            query = (Select((self,), columns)
+                     .with_cte(self)
+                     .bind(self._query._database))
         return query
 
     def _get_hash(self):
@@ -3107,14 +3107,8 @@ class ExceptionWrapper(object):
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type is None:
             return
-        # psycopg shits out a million cute error types. Try to catch em all.
-        if pg_errors is not None and exc_type.__name__ not in self.exceptions \
-           and issubclass(exc_type, pg_errors.Error):
-            exc_type = exc_type.__bases__[0]
-        elif pg3_errors is not None and \
-           exc_type.__name__ not in self.exceptions \
-           and issubclass(exc_type, pg3_errors.Error):
-            exc_type = exc_type.__bases__[0]
+        if exc_type.__name__ not in self.exceptions:
+            exc_type = exc_type.__bases__[0]  # Try grabbing DB-API class.
         if exc_type.__name__ in self.exceptions:
             new_type = self.exceptions[exc_type.__name__]
             exc_args = exc_value.args
@@ -4220,11 +4214,14 @@ class PostgresqlDatabase(Database):
                     FROM generate_subscripts(idx.indkey, 1) AS k
                     ORDER BY k), ',')
             FROM pg_catalog.pg_class AS t
+            INNER JOIN pg_catalog.pg_namespace AS n ON t.relnamespace = n.oid
             INNER JOIN pg_catalog.pg_index AS idx ON t.oid = idx.indrelid
             INNER JOIN pg_catalog.pg_class AS i ON idx.indexrelid = i.oid
-            INNER JOIN pg_catalog.pg_indexes AS idxs ON
-                (idxs.tablename = t.relname AND idxs.indexname = i.relname)
-            WHERE t.relname = %s AND t.relkind = %s AND idxs.schemaname = %s
+            INNER JOIN pg_catalog.pg_indexes AS idxs ON (
+                idxs.tablename = t.relname
+                AND idxs.indexname = i.relname
+                AND idxs.schemaname = n.nspname)
+            WHERE t.relname = %s AND t.relkind = %s AND n.nspname = %s
             ORDER BY idx.indisunique DESC, i.relname;"""
         cursor = self.execute_sql(query, (table, 'r', schema or 'public'))
         return [IndexMetadata(name, sql.rstrip(' ;'), columns.split(','),
@@ -6022,7 +6019,6 @@ class ManyToManyField(MetaField):
         return type(klass_name, (Model,), attrs)
 
     def get_through_model(self):
-        # XXX: Deprecated. Just use the "through_model" property.
         return self.through_model
 
 
@@ -6307,6 +6303,14 @@ class SchemaManager(object):
                 ._create_context()
                 .literal(statement)
                 .sql(index_name))
+
+    def drop_index(self, field=None, index=None, safe=True):
+        if field is None and index is None:
+            raise ValueError('field or index must be specified.')
+        elif field:
+            index = ModelIndex(self.model, (field,), unique=field.unique,
+                               using=field.index_type)
+        return self.database.execute(self._drop_index(index, safe=safe))
 
     def drop_indexes(self, safe=True):
         for query in self._drop_indexes(safe=safe):

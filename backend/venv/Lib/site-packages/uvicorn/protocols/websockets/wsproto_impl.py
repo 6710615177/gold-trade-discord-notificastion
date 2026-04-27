@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import struct
+from asyncio import TimerHandle
+from io import BytesIO, StringIO
 from typing import Any, Literal, cast
 from urllib.parse import unquote
 
@@ -11,12 +15,7 @@ from wsproto.connection import ConnectionState
 from wsproto.extensions import Extension, PerMessageDeflate
 from wsproto.utilities import LocalProtocolError, RemoteProtocolError
 
-from uvicorn._types import (
-    ASGI3Application,
-    ASGISendEvent,
-    WebSocketEvent,
-    WebSocketScope,
-)
+from uvicorn._types import ASGI3Application, ASGISendEvent, WebSocketEvent, WebSocketReceiveEvent, WebSocketScope
 from uvicorn.config import Config
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.utils import (
@@ -28,6 +27,36 @@ from uvicorn.protocols.utils import (
     is_ssl,
 )
 from uvicorn.server import ServerState
+
+
+class FrameTooLargeError(Exception):
+    """Raised when accumulated websocket message bytes exceed `ws_max_size`."""
+
+
+class WebsocketBuffer:
+    def __init__(self, max_length: int) -> None:
+        self.value: BytesIO | StringIO | None = None
+        self.length = 0
+        self.max_length = max_length
+
+    def extend(self, event: events.TextMessage | events.BytesMessage) -> None:
+        if self.value is None:
+            self.value = StringIO() if isinstance(event, events.TextMessage) else BytesIO()
+        self.value.write(event.data)  # type: ignore[arg-type]
+        # `ws_max_size` is a byte budget, so count UTF-8 bytes for text.
+        self.length += len(event.data.encode()) if isinstance(event, events.TextMessage) else len(event.data)
+        if self.length > self.max_length:
+            raise FrameTooLargeError
+
+    def clear(self) -> None:
+        self.value = None
+        self.length = 0
+
+    def to_message(self) -> WebSocketReceiveEvent:
+        if isinstance(self.value, StringIO):
+            return {"type": "websocket.receive", "text": self.value.getvalue()}
+        assert isinstance(self.value, BytesIO)
+        return {"type": "websocket.receive", "bytes": self.value.getvalue()}
 
 
 class WSProtocol(asyncio.Protocol):
@@ -73,15 +102,21 @@ class WSProtocol(asyncio.Protocol):
         self.writable = asyncio.Event()
         self.writable.set()
 
-        # Buffers
-        self.bytes = b""
-        self.text = ""
+        # Keepalive state
+        self.ping_interval = config.ws_ping_interval
+        self.ping_timeout = config.ws_ping_timeout
+        self.ping_timer: TimerHandle | None = None
+        self.pong_timer: TimerHandle | None = None
+        self.pending_ping_payload: bytes | None = None
+        self.ping_sent_at: float = 0.0
+        self.last_ping_rtt: float = 0.0
+
+        # Buffer
+        self.buffer = WebsocketBuffer(self.config.ws_max_size)
 
     # Protocol interface
 
-    def connection_made(  # type: ignore[override]
-        self, transport: asyncio.Transport
-    ) -> None:
+    def connection_made(self, transport: asyncio.Transport) -> None:  # type: ignore[override]
         self.connections.add(self)
         self.transport = transport
         self.server = get_local_addr(transport)
@@ -93,6 +128,7 @@ class WSProtocol(asyncio.Protocol):
             self.logger.log(TRACE_LOG_LEVEL, "%sWebSocket connection made", prefix)
 
     def connection_lost(self, exc: Exception | None) -> None:
+        self.stop_keepalive()
         code = 1005 if self.handshake_complete else 1006
         self.queue.put_nowait({"type": "websocket.disconnect", "code": code})
         self.connections.remove(self)
@@ -120,16 +156,18 @@ class WSProtocol(asyncio.Protocol):
 
     def handle_events(self) -> None:
         for event in self.conn.events():
+            if self.close_sent:
+                return
             if isinstance(event, events.Request):
                 self.handle_connect(event)
-            elif isinstance(event, events.TextMessage):
-                self.handle_text(event)
-            elif isinstance(event, events.BytesMessage):
-                self.handle_bytes(event)
+            elif isinstance(event, (events.TextMessage, events.BytesMessage)):
+                self.handle_message(event)
             elif isinstance(event, events.CloseConnection):
                 self.handle_close(event)
             elif isinstance(event, events.Ping):
                 self.handle_ping(event)
+            elif isinstance(event, events.Pong):
+                self.handle_pong(event)
 
     def pause_writing(self) -> None:
         """
@@ -144,6 +182,7 @@ class WSProtocol(asyncio.Protocol):
         self.writable.set()  # pragma: full coverage
 
     def shutdown(self) -> None:
+        self.stop_keepalive()
         if self.handshake_complete:
             self.queue.put_nowait({"type": "websocket.disconnect", "code": 1012})
             output = self.conn.send(wsproto.events.CloseConnection(code=1012))
@@ -185,21 +224,20 @@ class WSProtocol(asyncio.Protocol):
         task.add_done_callback(self.on_task_complete)
         self.tasks.add(task)
 
-    def handle_text(self, event: events.TextMessage) -> None:
-        self.text += event.data
+    def handle_message(self, event: events.TextMessage | events.BytesMessage) -> None:
+        try:
+            self.buffer.extend(event)
+        except FrameTooLargeError:
+            self.close_sent = True
+            reason = f"Message exceeds the maximum size ({self.config.ws_max_size} bytes)"
+            self.queue.put_nowait({"type": "websocket.disconnect", "code": 1009, "reason": reason})
+            if not self.transport.is_closing():
+                self.transport.write(self.conn.send(wsproto.events.CloseConnection(code=1009, reason=reason)))
+                self.transport.close()
+            return
         if event.message_finished:
-            self.queue.put_nowait({"type": "websocket.receive", "text": self.text})
-            self.text = ""
-            if not self.read_paused:
-                self.read_paused = True
-                self.transport.pause_reading()
-
-    def handle_bytes(self, event: events.BytesMessage) -> None:
-        self.bytes += event.data
-        # todo: we may want to guard the size of self.bytes and self.text
-        if event.message_finished:
-            self.queue.put_nowait({"type": "websocket.receive", "bytes": self.bytes})
-            self.bytes = b""
+            self.queue.put_nowait(self.buffer.to_message())
+            self.buffer.clear()
             if not self.read_paused:
                 self.read_paused = True
                 self.transport.pause_reading()
@@ -212,6 +250,65 @@ class WSProtocol(asyncio.Protocol):
 
     def handle_ping(self, event: events.Ping) -> None:
         self.transport.write(self.conn.send(event.response()))
+
+    def handle_pong(self, event: events.Pong) -> None:
+        # Ignore unsolicited pongs and stale pongs whose payload doesn't match the ping currently in flight.
+        if self.pending_ping_payload is None or bytes(event.payload) != self.pending_ping_payload:
+            return  # pragma: no cover
+
+        self.last_ping_rtt = self.loop.time() - self.ping_sent_at
+        self.pending_ping_payload = None
+        # The peer answered in time; cancel the pong deadline and chain the next ping. This `schedule_ping()` call is
+        # what keeps the keepalive loop running when ping_timeout is set. When ping_timeout is None the next ping is
+        # already scheduled by `send_keepalive_ping`, so we must not schedule a duplicate here.
+        if self.pong_timer is not None:
+            self.pong_timer.cancel()
+            self.pong_timer = None
+            self.schedule_ping()
+
+    def start_keepalive(self) -> None:
+        if self.ping_interval is not None and self.ping_interval > 0:
+            self.schedule_ping()
+
+    def stop_keepalive(self) -> None:
+        if self.ping_timer is not None:
+            self.ping_timer.cancel()
+            self.ping_timer = None
+        if self.pong_timer is not None:  # pragma: no cover
+            self.pong_timer.cancel()
+            self.pong_timer = None
+        self.pending_ping_payload = None
+
+    def schedule_ping(self) -> None:
+        assert self.ping_interval is not None
+        delay = max(0.0, self.ping_interval - self.last_ping_rtt)
+        self.ping_timer = self.loop.call_later(delay, self.send_keepalive_ping)
+
+    def send_keepalive_ping(self) -> None:
+        self.ping_timer = None
+        if self.close_sent or self.transport.is_closing():  # pragma: no cover
+            return
+        # Random 4-byte payload identifies this ping; `handle_pong` uses it to ignore stale or unsolicited pongs.
+        self.pending_ping_payload = struct.pack("!I", random.getrandbits(32))
+        self.ping_sent_at = self.loop.time()
+        self.transport.write(self.conn.send(wsproto.events.Ping(payload=self.pending_ping_payload)))
+        if self.ping_timeout is not None:
+            self.pong_timer = self.loop.call_later(self.ping_timeout, self.keepalive_timeout)
+        else:  # pragma: no cover
+            self.schedule_ping()
+
+    def keepalive_timeout(self) -> None:
+        self.pong_timer = None
+        self.pending_ping_payload = None
+        if self.close_sent or self.transport.is_closing():  # pragma: no cover
+            return
+        if self.logger.level <= TRACE_LOG_LEVEL:
+            prefix = "%s:%d - " % self.client if self.client else ""
+            self.logger.log(TRACE_LOG_LEVEL, "%sWebSocket keepalive ping timeout", prefix)
+        reason = "keepalive ping timeout"
+        self.transport.write(self.conn.send(wsproto.events.CloseConnection(code=1011, reason=reason)))
+        self.close_sent = True
+        self.transport.close()
 
     def send_500_response(self) -> None:
         if self.response_started or self.handshake_complete:
@@ -266,6 +363,7 @@ class WSProtocol(asyncio.Protocol):
                         )
                     )
                     self.transport.write(output)
+                    self.start_keepalive()
 
             elif message["type"] == "websocket.close":
                 self.queue.put_nowait({"type": "websocket.disconnect", "code": 1006})
