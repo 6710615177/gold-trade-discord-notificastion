@@ -1,4 +1,4 @@
-﻿# gold-trad-final
+﻿# gold-trade-LSTM-plus-LLM
 
-backend รัน uvivorn main:app --reload
-frontend รัน npm run dev 
+frontend รัน npm run build
+backend รัน python main.py
