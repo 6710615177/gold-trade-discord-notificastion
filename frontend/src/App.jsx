@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import ThaiGoldChart from "./ThaiGoldChart";
 
+
 function getSignalIcon(signal) {
   if (signal === "BUY") return "▲";
   if (signal === "SELL") return "▼";
@@ -25,6 +26,7 @@ function getSecondsToNextInterval() {
 }
 
 const HISTORY_KEY = "gold_history_cache";
+const API = import.meta.env.VITE_API_BASE_URL;
 
 export default function App() {
   const [date, setDate] = useState("");
@@ -54,7 +56,7 @@ export default function App() {
 
   async function fetchNews() {
     try {
-      const res = await fetch("/api/news");
+      const res = await fetch(`${API}/api/news`);
       if (res.ok) {
         const data = await res.json();
         setNews(data.news || []);
@@ -64,7 +66,7 @@ export default function App() {
 
   async function getDashboard() {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(`${API}/api/status`);
       if (res.ok) setDashboard(await res.json());
     } catch (err) { console.error("Error fetching dashboard", err); }
   }
@@ -88,7 +90,7 @@ export default function App() {
       // ถ้ากำลังโชว์กล่องตัดสินใจอยู่ หรือตลาดปิด ไม่ต้องดึงกวน
       if (aiData || (dashboard && dashboard.period && !dashboard.period.is_active)) return;
       try {
-        const res = await fetch("/api/pending-signal");
+        const res = await fetch(`${API}/api/pending-signal`);
         const data = await res.json();
         if (data && data.signal) {
           setAiData(data.signal);
@@ -104,7 +106,7 @@ export default function App() {
   const submitDecision = async (userAction) => {
     if (!aiData) return;
     try {
-      await fetch("/api/execute", {
+      await fetch(`${API}/api/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -134,7 +136,7 @@ export default function App() {
 
   const savePortfolio = async () => {
     try {
-      await fetch("/api/portfolio", {
+      await fetch(`${API}/api/portfolio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
