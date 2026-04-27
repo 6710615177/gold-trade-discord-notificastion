@@ -7,12 +7,12 @@ load_dotenv()
 # 🎯 สร้างตัวแปรบังคับตำแหน่งไฟล์ ให้อยู่ในโฟลเดอร์เดียวกับ config.py (คือโฟลเดอร์ backend เสมอ)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# API Keys (ดึงจากตัวแปร Environment) 
+# API Keys (ดึงจากตัวแปร Environment)
 GROQ_API_KEYS = [
     os.getenv("GROQ_API_KEY_1", ""),
-    os.getenv("GROQ_API_KEY_2", "")
-    os.getenv("GROQ_API_KEY_3", "")
-    os.getenv("GROQ_API_KEY_4", "")
+    os.getenv("GROQ_API_KEY_2", ""),
+    os.getenv("GROQ_API_KEY_3", ""),
+    os.getenv("GROQ_API_KEY_4", ""),
 ]
 GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k.strip() != ""]
 
@@ -29,7 +29,7 @@ HISTORICAL_CSV = os.path.join(BASE_DIR, "gold_historical_2568_2569_combined.csv"
 DEALS_CSV_FILE = os.path.join(BASE_DIR, "CN240_Deals_Record.csv")
 BAHT_TO_GRAM = 15.244
 
-# Market Settings 
+# Market Settings
 GOLD_HISTORY_PERIOD = "3mo"
 FOREX_HISTORY_PERIOD = "14d"
 EMA_FAST = 14
@@ -38,15 +38,15 @@ RSI_PERIOD = 14
 RSI_BUY_THRESHOLD = 40
 RSI_SELL_THRESHOLD = 60
 
-# System Timers 
+# System Timers
 RUN_EVERY_MINUTES = 2
 DECISION_TIMEOUT_SECONDS = 15
 
-# Trading Quotas 
+# Trading Quotas
 TRADE_QUOTAS = {
     "WD_Morning": 2,
     "WD_Afternoon": 2,
     "WD_Evening": 2,
     "WD_Late_Night": 0,
-    "WE_Active": 2
+    "WE_Active": 2,
 }
