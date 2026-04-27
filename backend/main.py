@@ -767,6 +767,9 @@ def execute_trade(req: ExecuteRequest):
 
     return results
 
+@api_router.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 app.include_router(api_router)
 
