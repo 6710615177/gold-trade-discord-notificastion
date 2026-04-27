@@ -1,0 +1,15 @@
+# Environments
+.env
+.venv/
+venv/
+__pycache__/
+
+# Frontend dependencies
+node_modules/
+dist/
+
+# Database & Logs (เพื่อให้บนคลาวด์เริ่มนับใหม่)
+logs.db
+portfolio.json
+live_gold_log.json
+chart_history.json
