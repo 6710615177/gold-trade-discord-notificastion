@@ -27,7 +27,7 @@ DISCORD_SELL_WEBHOOK_URL = os.getenv("DISCORD_SELL_WEBHOOK_URL")
 LAST_SIGNAL_FILE = "last_signal.json"
 
 
-def send_discord_alert(action: str, reason: str, price=None):
+def send_discord_alert(action: str, reasons: list, price=None):
     if action not in ["BUY", "SELL"]:
         return
 
@@ -39,22 +39,23 @@ def send_discord_alert(action: str, reason: str, price=None):
         print(f"Discord Alert Error: webhook for {action} is not set")
         return
 
-    clean_reason = (
-        reason.replace("<strong>", "")
-        .replace("</strong>", "")
-        .replace("<br/>", "\n")
-        .replace("<i>", "")
-        .replace("</i>", "")
-    )
-
-    color = 0x2ECC71 if action == "BUY" else 0xE74C3C
+    clean_reasons = []
+    for r in reasons:
+        clean = (
+            r.replace("<strong>", "")
+            .replace("</strong>", "")
+            .replace("<br/>", "\n")
+            .replace("<i>", "")
+            .replace("</i>", "")
+        )
+        clean_reasons.append(clean)
 
     payload = {
         "username": "Gold Trading AI",
         "embeds": [
             {
                 "title": f"🚨 AI Gold Signal: {action}",
-                "color": color,
+                "color": 0x2ECC71 if action == "BUY" else 0xE74C3C,
                 "fields": [
                     {
                         "name": "ราคา",
@@ -62,8 +63,10 @@ def send_discord_alert(action: str, reason: str, price=None):
                         "inline": False,
                     },
                     {
-                        "name": "เหตุผล",
-                        "value": clean_reason[:1000],
+                        "name": "เหตุผลรวม",
+                        "value": "\n\n".join(
+                            [f"{i + 1}. {r}" for i, r in enumerate(clean_reasons)]
+                        )[:1000],
                         "inline": False,
                     },
                 ],
@@ -517,7 +520,7 @@ async def auto_analysis_loop():
 
                         send_discord_alert(
                             ai_act,
-                            result.get("ai_reason", ""),
+                            [result.get("ai_reason", "")],
                             result.get("current_market_price"),
                         )
 
