@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import ThaiGoldChart from "./ThaiGoldChart";
 
+
 function getSignalIcon(signal) {
   if (signal === "BUY") return "▲";
   if (signal === "SELL") return "▼";
@@ -23,6 +24,9 @@ function getSecondsToNextInterval() {
   target.setMinutes(nextMin, 0, 0);
   return Math.floor((target.getTime() - now.getTime()) / 1000);
 }
+
+const HISTORY_KEY = "gold_history_cache";
+const API = import.meta.env.VITE_API_BASE_URL;
 
 export default function App() {
   const [date, setDate] = useState("");
@@ -48,19 +52,11 @@ export default function App() {
     loadHistory();
     getDashboard();
     fetchNews();
-
-    // 🎯 เพิ่มระบบ Auto-Sync ดึงข้อมูล Performance และประวัติใหม่ทุกๆ 10 วินาที
-    const autoSyncInterval = setInterval(() => {
-      getDashboard();
-      loadHistory();
-    }, 10000);
-
-    return () => clearInterval(autoSyncInterval);
   }, []);
 
   async function fetchNews() {
     try {
-      const res = await fetch("/api/news");
+      const res = await fetch(`${API}/api/news`);
       if (res.ok) {
         const data = await res.json();
         setNews(data.news || []);
@@ -70,23 +66,22 @@ export default function App() {
 
   async function getDashboard() {
     try {
-      // 🎯 ใส่ Cache Buster ?t=Date.now() เพื่อบังคับให้ดึงข้อมูลใหม่เสมอ ไม่จำของเก่า
-      const res = await fetch(`/api/status?t=${Date.now()}`);
+      const res = await fetch(`${API}/api/status`);
       if (res.ok) setDashboard(await res.json());
     } catch (err) { console.error("Error fetching dashboard", err); }
   }
 
-  async function loadHistory() {
-    try {
-      // 🎯 ใส่ Cache Buster เช่นเดียวกัน
-      const res = await fetch(`/api/history?t=${Date.now()}`);
-      const data = await res.json();
-      if (data.status === "success") {
-        setHistory(data.history);
-      }
-    } catch (e) {
-      console.error("Error loading history from server:", e);
-    }
+  function saveHistory(signal, reason) {
+    let historyArr = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+    const newTime = new Date().getTime();
+    historyArr.push({ signal, reason, time: newTime });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(historyArr));
+    setHistory(historyArr.sort((a, b) => b.time - a.time));
+  }
+
+  function loadHistory() {
+    let historyArr = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+    setHistory(historyArr.sort((a, b) => b.time - a.time));
   }
 
   // 🎯 Polling: ถาม Backend ทุกๆ 5 วินาทีว่ามี AI วิเคราะห์ทิ้งไว้ไหม
@@ -95,112 +90,7 @@ export default function App() {
       // ถ้ากำลังโชว์กล่องตัดสินใจอยู่ หรือตลาดปิด ไม่ต้องดึงกวน
       if (aiData || (dashboard && dashboard.period && !dashboard.period.is_active)) return;
       try {
-        const res = await fetch(`/api/pending-signal?t=${Date.now()}`);
-        const data = await res.json();
-        if (data && data.signal) {
-... (275 lines left)
-
-App.jsx
-21 KB
-﻿
-import React, { useEffect, useState, useRef } from "react";
-import ThaiGoldChart from "./ThaiGoldChart";
-
-function getSignalIcon(signal) {
-  if (signal === "BUY") return "▲";
-  if (signal === "SELL") return "▼";
-  return "●";
-}
-
-function formatTime(sec) {
-  if (sec < 0) sec = 0;
-  let m = Math.floor(sec / 60);
-  let s = sec % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// ใช้แสดงเวลาคร่าวๆ ให้ User รู้ว่าระบบหลังบ้านจะทำงานเมื่อไหร่
-function getSecondsToNextInterval() {
-  const now = new Date();
-  const currentMin = now.getMinutes();
-  const nextMin = currentMin + (2 - (currentMin % 2));
-  let target = new Date(now);
-  target.setMinutes(nextMin, 0, 0);
-  return Math.floor((target.getTime() - now.getTime()) / 1000);
-}
-
-export default function App() {
-  const [date, setDate] = useState("");
-  const [timer, setTimer] = useState("2:00");
-  const [dashboard, setDashboard] = useState(null);
-
-  const [currentPrice, setCurrentPrice] = useState({ buy: 0, sell: 0 });
-  const [news, setNews] = useState([]);
-
-  const [aiData, setAiData] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [history, setHistory] = useState([]);
-  const [showAllHistory, setShowAllHistory] = useState(false);
-
-  const [isEditingPortfolio, setIsEditingPortfolio] = useState(false);
-  const [editCash, setEditCash] = useState("");
-  const [editGold, setEditGold] = useState("");
-
-  const timerInterval = useRef(null);
-
-  useEffect(() => {
-    setDate(new Date().toLocaleDateString("th-TH"));
-    loadHistory();
-    getDashboard();
-    fetchNews();
-
-    // 🎯 เพิ่มระบบ Auto-Sync ดึงข้อมูล Performance และประวัติใหม่ทุกๆ 10 วินาที
-    const autoSyncInterval = setInterval(() => {
-      getDashboard();
-      loadHistory();
-    }, 10000);
-
-    return () => clearInterval(autoSyncInterval);
-  }, []);
-
-  async function fetchNews() {
-    try {
-      const res = await fetch("/api/news");
-      if (res.ok) {
-        const data = await res.json();
-        setNews(data.news || []);
-      }
-    } catch (e) { console.error("Error fetching news:", e); }
-  }
-
-  async function getDashboard() {
-    try {
-      // 🎯 ใส่ Cache Buster ?t=Date.now() เพื่อบังคับให้ดึงข้อมูลใหม่เสมอ ไม่จำของเก่า
-      const res = await fetch(`/api/status?t=${Date.now()}`);
-      if (res.ok) setDashboard(await res.json());
-    } catch (err) { console.error("Error fetching dashboard", err); }
-  }
-
-  async function loadHistory() {
-    try {
-      // 🎯 ใส่ Cache Buster เช่นเดียวกัน
-      const res = await fetch(`/api/history?t=${Date.now()}`);
-      const data = await res.json();
-      if (data.status === "success") {
-        setHistory(data.history);
-      }
-    } catch (e) {
-      console.error("Error loading history from server:", e);
-    }
-  }
-
-  // 🎯 Polling: ถาม Backend ทุกๆ 5 วินาทีว่ามี AI วิเคราะห์ทิ้งไว้ไหม
-  useEffect(() => {
-    const checkPendingSignal = async () => {
-      // ถ้ากำลังโชว์กล่องตัดสินใจอยู่ หรือตลาดปิด ไม่ต้องดึงกวน
-      if (aiData || (dashboard && dashboard.period && !dashboard.period.is_active)) return;
-      try {
-        const res = await fetch(`/api/pending-signal?t=${Date.now()}`);
+        const res = await fetch(`${API}/api/pending-signal`);
         const data = await res.json();
         if (data && data.signal) {
           setAiData(data.signal);
@@ -216,7 +106,7 @@ export default function App() {
   const submitDecision = async (userAction) => {
     if (!aiData) return;
     try {
-      await fetch("/api/execute", {
+      await fetch(`${API}/api/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -226,13 +116,13 @@ export default function App() {
           user_action: userAction,
         })
       });
-
+      saveHistory(
+        userAction === "TIMEOUT" ? aiData.ai_action : userAction,
+        aiData.ai_reason 
+      );
       setAiData(null);
       setTimeLeft(0);
-
-      // 🎯 ดึงข้อมูลใหม่ทั้งหมดหลังจากบันทึกสำเร็จ (ตอนนี้จะไม่ติด Cache แล้ว)
       await getDashboard();
-      await loadHistory();
     } catch (error) { console.error(error); }
   };
 
@@ -246,7 +136,7 @@ export default function App() {
 
   const savePortfolio = async () => {
     try {
-      await fetch("/api/portfolio", {
+      await fetch(`${API}/api/portfolio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -292,7 +182,7 @@ export default function App() {
 
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: "15px", marginBottom: "20px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <h1 style={{ color: "#7B542F", margin: 0, lineHeight: "1.5", fontSize: "clamp(24px, 4vw, 36px)" }}>
+          <h1 style={{ color: "#7B542F", margin: 0, lineHeight: "1.5", fontSize: "clamp(24px, 4vw, 36px)"}}>
             เทรดทองพารวย
           </h1>
           <p style={{ margin: 0, color: "#555", fontSize: "16px" }}>
@@ -327,7 +217,7 @@ export default function App() {
 
       <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", flexDirection: "row" }}>
         <div style={{ flex: "2 1 60%", minWidth: "300px" }}>
-
+          
           <div style={{ background: "#F5E7C6", borderRadius: "12px", padding: "15px", marginBottom: "20px" }}>
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", gap: "10px" }}>
               <h3 style={{ margin: 0, color: "#7B542F", fontSize: "1.1rem" }}>ราคาทองฮั่วเซ่งเฮง (Real-time)</h3>
@@ -349,8 +239,8 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
               <h2 style={{ color: "#7B542F", margin: 0 }}>ประวัติการทำรายการ (Local)</h2>
               {history.length > 5 && (
-                <button
-                  onClick={() => setShowAllHistory(!showAllHistory)}
+                <button 
+                  onClick={() => setShowAllHistory(!showAllHistory)} 
                   style={{ background: "transparent", color: "#155fa0", border: "1px solid #155fa0", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}
                 >
                   {showAllHistory ? "ซ่อนรายการ" : `ดูทั้งหมด (${history.length})`}
@@ -466,7 +356,7 @@ export default function App() {
               </div>
             </div>
           )}
-
+          
           {!aiData && dashboard && dashboard.period && dashboard.period.is_active && (
             <div style={{ padding: "15px", background: "transparent", color: "#888", border: "2px dashed #ccc", borderRadius: "8px", textAlign: "center", fontSize: "14px" }}>
               ระบบกำลังรอสัญญาณจาก AI...
@@ -478,3 +368,4 @@ export default function App() {
     </div>
   );
 }
+
