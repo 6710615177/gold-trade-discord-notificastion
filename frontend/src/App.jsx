@@ -1,8 +1,3 @@
-raF
-farxaway
-Invisible
-
-sxjsbdjsbsjs — 16:23
 import React, { useEffect, useState, useRef } from "react";
 import ThaiGoldChart from "./ThaiGoldChart";
 
