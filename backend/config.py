@@ -16,7 +16,7 @@ GROQ_API_KEYS = [
 ]
 GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k.strip() != ""]
 
-ENABLE_UNIVERSITY_API = False
+ENABLE_UNIVERSITY_API = True
 TEAM_API_KEY = os.getenv("TEAM_API_KEY", "")
 LOG_BASE_URL = "https://goldtrade-logs-api.poonnatuch.workers.dev"
 
