@@ -44,9 +44,9 @@ DECISION_TIMEOUT_SECONDS = 15
 
 # Trading Quotas
 TRADE_QUOTAS = {
-    "WD_Morning": 4,
-    "WD_Afternoon": 4,
-    "WD_Evening": 4,
+    "WD_Morning": 2,
+    "WD_Afternoon": 2,
+    "WD_Evening": 2,
     "WD_Late_Night": 0,
-    "WE_Active": 4,
+    "WE_Active": 2,
 }
