@@ -117,8 +117,10 @@ export default function App() {
         })
       });
       saveHistory(
-        userAction === "TIMEOUT" ? aiData.ai_action : userAction,
-        aiData.ai_reason 
+        userAction === "TIMEOUT" ? "HOLD" : userAction,
+        userAction === "TIMEOUT"
+          ? "Auto-executed by system"
+          : aiData.ai_reason
       );
       setAiData(null);
       setTimeLeft(0);
@@ -368,3 +370,4 @@ export default function App() {
     </div>
   );
 }
+
