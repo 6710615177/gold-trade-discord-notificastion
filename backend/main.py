@@ -90,6 +90,10 @@ GROQ_API_KEYS = [
     os.getenv("GROQ_API_KEY_2", ""),
     os.getenv("GROQ_API_KEY_3", ""),
     os.getenv("GROQ_API_KEY_4", ""),
+    os.getenv("GROQ_API_KEY_5", ""),
+    os.getenv("GROQ_API_KEY_6", ""),
+    os.getenv("GROQ_API_KEY_7", ""),
+    os.getenv("GROQ_API_KEY_8", ""),
 ]
 GROQ_API_KEYS = [k for k in GROQ_API_KEYS if k.strip() != ""]
 
